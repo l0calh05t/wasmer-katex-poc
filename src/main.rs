@@ -2,25 +2,14 @@ use anyhow::Result;
 use serde::Serialize;
 use std::io::Read;
 use wasmer::*;
-use wasmer_wasi::{Fd, Pipe, WasiFs, WasiState, ALL_RIGHTS, VIRTUAL_ROOT_FD};
+use wasmer_wasi::{Pipe, WasiState};
 
-mod virtual_file;
-use virtual_file::VirtualFile;
-
-#[derive(Clone, Serialize)]
-#[allow(non_snake_case)]
+#[derive(Clone, Default, Serialize)]
 struct KatexOptions {
-	displayMode: bool,
-	throwOnError: bool,
-}
-
-impl Default for KatexOptions {
-	fn default() -> Self {
-		KatexOptions {
-			displayMode: false,
-			throwOnError: true,
-		}
-	}
+	#[serde(rename = "displayMode", skip_serializing_if = "Option::is_none")]
+	display_mode: Option<bool>,
+	#[serde(rename = "throwOnError", skip_serializing_if = "Option::is_none")]
+	throw_on_error: Option<bool>,
 }
 
 fn main() -> Result<()> {
@@ -29,42 +18,27 @@ fn main() -> Result<()> {
 
 	let equation = r"c = \pm\sqrt{a^2 + b^2}";
 	let options = KatexOptions {
-		displayMode: true,
+		display_mode: Some(true),
 		..KatexOptions::default()
 	};
 
-	// let mut wasi_fs = WasiFs::open_file_at(&mut self, base, file, open_flags, name, rights, rights_inheriting, flags)
+	let katex = concat!(
+		include_str!("../vendor/katex.min.js"),
+		include_str!("../vendor/contrib/mhchem.min.js")
+	);
+
+	// newer versions of QuickJS support a -I flag to include a script file before evaluating
+	// but the pre-compiled WASM/WASI module is old, so we concatenate everything
+	let source = format!(
+		"{}console.log(katex.renderToString({}, {}))",
+		katex,
+		serde_json::to_string(equation).unwrap(),
+		serde_json::to_string(&options).unwrap(),
+	);
+
 	let mut wasi_env = WasiState::new("qjs")
-		.setup_fs(Box::new(move |fs: &mut WasiFs| {
-			let katex = include_bytes!("../vendor/katex.min.js");
-			let mut source_vec = Vec::with_capacity(katex.len());
-			source_vec.extend_from_slice(katex);
-
-			// newer versions of QuickJS support a -I flag to include a script file before evaluating
-			// but the pre-compiled WASM/WASI module is old, so we append to our virtual file
-			source_vec.extend_from_slice(
-				format!(
-					"console.log(katex.renderToString({}, {}))",
-					serde_json::to_string(equation).unwrap(),
-					serde_json::to_string(&options).unwrap()
-				)
-				.as_bytes(),
-			);
-
-			fs.open_file_at(
-				VIRTUAL_ROOT_FD,
-				Box::new(VirtualFile::new(source_vec)),
-				Fd::READ,
-				"script.js".to_owned(),
-				ALL_RIGHTS,
-				ALL_RIGHTS,
-				0,
-			)
-			.unwrap();
-			Ok(())
-		}))
-		.arg("--script")
-		.arg("/script.js")
+		.arg("-e")
+		.arg(source)
 		.stdout(Box::new(Pipe::new()))
 		.finalize()?;
 	let import_object = wasi_env.import_object(&module)?;

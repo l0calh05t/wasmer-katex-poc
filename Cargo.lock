@@ -1095,7 +1095,6 @@ dependencies = [
  "anyhow",
  "serde",
  "serde_json",
- "typetag",
  "wasmer",
  "wasmer-wasi",
 ]
