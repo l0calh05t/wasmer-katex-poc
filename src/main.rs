@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use std::io::Read;
 use wasmer::*;
@@ -32,8 +32,8 @@ fn main() -> Result<()> {
 	let source = format!(
 		"{}console.log(katex.renderToString({}, {}))",
 		katex,
-		serde_json::to_string(equation).unwrap(),
-		serde_json::to_string(&options).unwrap(),
+		serde_json::to_string(equation)?,
+		serde_json::to_string(&options)?,
 	);
 
 	let mut wasi_env = WasiState::new("qjs")
@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 	start.call(&[])?;
 
 	let mut state = wasi_env.state();
-	let wasi_stdout = state.fs.stdout_mut()?.as_mut().unwrap();
+	let wasi_stdout = state.fs.stdout_mut()?.as_mut().context("stdout as_mut")?;
 	let mut buf = String::new();
 	wasi_stdout.read_to_string(&mut buf)?;
 	println!("{}", buf.trim());
